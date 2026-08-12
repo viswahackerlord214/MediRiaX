@@ -1,0 +1,183 @@
+// This tells Prisma we are using PostgreSQL
+datasource db {
+  provider = "postgresql"
+}
+
+// This tells Prisma to generate the TypeScript Client
+generator client {
+  provider = "prisma-client-js"
+}
+
+// --- ENUMS ---
+enum Role {
+  PATIENT
+  DOCTOR
+  ADMIN
+}
+
+enum AppointmentStatus {
+  REQUESTED
+  ACCEPTED
+  SCHEDULED
+  COMPLETED
+  CANCELLED
+}
+
+// --- MODELS ---
+model User {
+  id             String          @id @default(uuid())
+  email          String          @unique
+  passwordHash   String
+  role           Role            @default(PATIENT)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  patientProfile PatientProfile?
+  doctorProfile  DoctorProfile?
+
+  // Appointments
+  appointments       Appointment[]   @relation("PatientAppointments")
+  doctorAppointments Appointment[]   @relation("DoctorAppointments")
+
+  // Consultation Chats
+  patientChats       ConsultationChat[] @relation("PatientChats")
+  doctorChats        ConsultationChat[] @relation("DoctorChats")
+
+  // Medical Records & Notifications
+  medicalRecords   MedicalRecord[]   @relation("UserMedicalRecords")
+  patientDocuments PatientDocument[] @relation("PatientDocuments")
+  notifications    Notification[]    @relation("UserNotifications")
+}
+
+model PatientProfile {
+  id            String   @id @default(uuid())
+  userId        String   @unique
+  firstName     String
+  lastName      String
+  dateOfBirth   DateTime
+  contactNumber String
+  
+  user          User     @relation(fields: [userId], references: [id])
+}
+
+model DoctorProfile {
+  id             String   @id @default(uuid())
+  userId         String   @unique
+  firstName      String
+  lastName       String
+  specialization String
+  licenseNumber  String   @unique
+  
+  user           User     @relation(fields: [userId], references: [id])
+}
+
+model Appointment {
+  id              String            @id @default(uuid())
+  
+  patientId       String
+  patient         User              @relation("PatientAppointments", fields: [patientId], references: [id])
+  
+  doctorId        String
+  doctor          User              @relation("DoctorAppointments", fields: [doctorId], references: [id])
+  
+  dateTime        DateTime
+  status          AppointmentStatus @default(REQUESTED)
+  reasonForVisit  String?
+  meetingLink     String?
+  
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  medicalRecord   MedicalRecord?
+  sharedRecords   AppointmentMedicalRecord[]
+  chat            ConsultationChat?
+}
+
+model ConsultationChat {
+  id            String        @id @default(uuid())
+  appointmentId String        @unique
+  appointment   Appointment   @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  
+  patientId     String
+  patient       User          @relation("PatientChats", fields: [patientId], references: [id])
+  
+  doctorId      String
+  doctor        User          @relation("DoctorChats", fields: [doctorId], references: [id])
+  
+  status        String        @default("ACTIVE") // ACTIVE, READ_ONLY
+  createdAt     DateTime      @default(now())
+
+  messages      ChatMessage[]
+}
+
+model ChatMessage {
+  id             String           @id @default(uuid())
+  chatId         String
+  chat           ConsultationChat @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  
+  senderId       String?          // null for System
+  senderRole     String           // Doctor / Patient / System
+  messageType    String           @default("TEXT") // TEXT, SYSTEM, MEETING_LINK, MEDICAL_RECORD, PRESCRIPTION, IMAGE, PDF
+  messageContent String
+  fileUrl        String?
+  createdAt      DateTime         @default(now())
+}
+
+model MedicalRecord {
+  id            String   @id @default(uuid())
+  patientId     String
+  patient       User     @relation("UserMedicalRecords", fields: [patientId], references: [id])
+  
+  title         String   @default("Medical Record")
+  recordType    String   @default("Lab Report") // Prescription, Blood Test, X-Ray, MRI, CT Scan, Lab Report, Other
+  fileUrl       String   @default("")
+  storagePath   String?
+  hospitalName  String?
+  reportDate    DateTime @default(now())
+  createdBy     String   @default("Patient") // Patient or Doctor
+  uploadedAt    DateTime @default(now())
+  
+  // Optional Clinical Record Data issued by Doctor
+  diagnosis     String?
+  prescription  String?
+  notes         String?
+  appointmentId String?  @unique
+  appointment   Appointment? @relation(fields: [appointmentId], references: [id])
+
+  sharedAppointments AppointmentMedicalRecord[]
+}
+
+model AppointmentMedicalRecord {
+  id              String        @id @default(uuid())
+  appointmentId   String
+  appointment     Appointment   @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  medicalRecordId String
+  medicalRecord   MedicalRecord @relation(fields: [medicalRecordId], references: [id], onDelete: Cascade)
+  
+  createdAt       DateTime      @default(now())
+
+  @@unique([appointmentId, medicalRecordId])
+}
+
+model PatientDocument {
+  id           String   @id @default(uuid())
+  patientId    String
+  title        String
+  category     String   @default("Lab Report")
+  hospitalName String?
+  reportDate   DateTime @default(now())
+  storagePath  String   @default("")
+  documentUrl  String?
+  uploadedAt   DateTime @default(now())
+
+  patient      User     @relation("PatientDocuments", fields: [patientId], references: [id])
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation("UserNotifications", fields: [userId], references: [id])
+  message   String
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
